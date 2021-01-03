@@ -52,23 +52,23 @@ function mergeChunksToFile(inputDir, outputFile) {
             .then(JSON.parse)
             .then((metadata) => metadata.files);
         
-        // break the chain. would have been more elegant with async/await
+        // break the chain. would have been more elegant with async/await.
+        // checking if files exists in parallel isn't really helpful but whatever
         let checkFilesPromise = filesPromise.then((files) => {
                 return files.map((file) => fsPromises.access(file));
             })
             .then((accessArray) => Promise.all(accessArray))
-            .catch(() => reject(new Error("Cannot find all chunks")));
+            .catch(() => { throw new Error("Cannot find all chunks") });
     
     let writerStream = fs.createWriteStream(outputFile);
+        writerStream.on('error', (err) => reject(err));
 
         Promise.all([filesPromise, checkFilesPromise])
             .then(([files,_]) => {
                 // TODO: handle errors
                 let p = Promise.resolve();
                 for (let i = 0; i < files.length; i++){
-                    p = p.then(() => fsPromises.readFile(files[i]))
-                        .then((data) => writerStream.write(data))
-                        // .catch((err) => reject(err));
+                    p = p.then(() => readAndPipePromise(files[i], writerStream));
     }
                 return p;
             })
@@ -78,3 +78,21 @@ function mergeChunksToFile(inputDir, outputFile) {
     });
 
 }
+
+/**
+ * Take a file, create a read stream and pipe it to a given open write stream.
+ * Returns a promise that will resolve when the reading ended.
+ * 
+ * @param {String} fileToRead A file to read from by creating a read stream.
+ * @param {fs.WriteStream} [writeStream] A write stream into which we pipe. Must be already open and will remain open afterwards.
+ * @returns {Promise} A promise that will be resolved when the reading ended.
+ */
+function readAndPipePromise(fileToRead, writeStream) {
+    return new Promise((resolve, reject) => {
+        let rs = fs.createReadStream(fileToRead);
+        rs.on('error', (err) => reject(err));
+        rs.pipe(writeStream, { end: false });
+        rs.on('end', () => resolve());
+    });
+}
+
