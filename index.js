@@ -3,15 +3,25 @@ const fsPromises = fs.promises;
 
 const maxChunkSize = 1024 * 1024 * 25; // 25MB
 
-const inputPath = "./input/sampleFile";
-const outputPath = "./output";
-const mergeOutput = "./output/mergedFile"
+ // in real life I would use something like yargs to handle the command line arguments
+const args = process.argv.slice(2);
+const inputPath = args[1];
+const outputPath = args[2];
 
-splitFileToChunks(inputPath, outputPath).catch((err) => console.error(err));
+switch (args[0]) {
+    case 'split':
+        splitFileToChunks(inputPath, outputPath).catch((err) => console.error(err));
+        break;
+    case 'merge':
+        mergeChunksToFile(inputPath, outputPath).catch((err) => console.error(err));
+        break;
+    default:
+        console.log('Command must be "split" or "merge"');
+}
 
-// mergeChunksToFile(outputPath, mergeOutput).catch((err) => console.error(err));
 
-// TODO: deal with relative and absolute pathes
+
+// TODO: deal with relative and absolute pathes, escape double slashes
 
 
 const baseChunkName = "Chunk";
@@ -19,29 +29,29 @@ function splitFileToChunks(inputFile, outputDir) {
 
     return new Promise((resolve, reject) => {
         
-    let readerStream = fs.createReadStream(inputFile, {highWaterMark: maxChunkSize});
+        let readerStream = fs.createReadStream(inputFile, {highWaterMark: maxChunkSize});
         readerStream.on('error', (err) => reject(err));
-    let metadata = {files: [], numberOfFiles: undefined}; // numberOfFiles can already be calculated, and array can be initalized with size
+        let metadata = {files: [], numberOfFiles: undefined}; // numberOfFiles can already be calculated, and array can be initalized with size
         let writeFilePromises = []; // see above
-    let index = 0;
+        let index = 0;
         readerStream.on('data', (chunk) => {
-        console.log(chunk.length);
-        let outputFile = `${outputDir}/${baseChunkName}_${index}`;
+            console.log(chunk.length);
+            let outputFile = `${outputDir}/${baseChunkName}_${index}`;
             let i = index;
             let writeFilePromise = fsPromises.writeFile(outputFile, chunk)
                 .then(() => metadata.files[i] = outputFile) // see above; dont write full path 
                 .catch(() => {throw new Error('Cannot save chunk to file')});
             writeFilePromises[index] = writeFilePromise;
-        index++;
+            index++;
         });
         readerStream.on('end', () => {
             metadata.numberOfFiles = index; // see above
             Promise.all(writeFilePromises)
                 .then(() => fsPromises.writeFile(`${outputDir}/metadata.json`, JSON.stringify(metadata)))
                 .then(resolve, reject);
-    });
-
         });
+        
+    });
 }
 
 function mergeChunksToFile(inputDir, outputFile) {
@@ -59,8 +69,8 @@ function mergeChunksToFile(inputDir, outputFile) {
             })
             .then((accessArray) => Promise.all(accessArray))
             .catch(() => { throw new Error("Cannot find all chunks") });
-    
-    let writerStream = fs.createWriteStream(outputFile);
+
+        let writerStream = fs.createWriteStream(outputFile);
         writerStream.on('error', (err) => reject(err));
 
         Promise.all([filesPromise, checkFilesPromise])
@@ -69,7 +79,7 @@ function mergeChunksToFile(inputDir, outputFile) {
                 let p = Promise.resolve();
                 for (let i = 0; i < files.length; i++){
                     p = p.then(() => readAndPipePromise(files[i], writerStream));
-    }
+                }
                 return p;
             })
             .then(() => writerStream.end())
@@ -95,4 +105,3 @@ function readAndPipePromise(fileToRead, writeStream) {
         rs.on('end', () => resolve());
     });
 }
-
