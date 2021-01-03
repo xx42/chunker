@@ -7,41 +7,41 @@ const inputPath = "./input/sampleFile";
 const outputPath = "./output";
 const mergeOutput = "./output/mergedFile"
 
-// splitFileToChunks(inputPath, outputPath);
+splitFileToChunks(inputPath, outputPath).catch((err) => console.error(err));
 
-mergeChunksToFile(outputPath, mergeOutput).catch((err) => console.error(err));
+// mergeChunksToFile(outputPath, mergeOutput).catch((err) => console.error(err));
 
+// TODO: deal with relative and absolute pathes
 
 
 const baseChunkName = "Chunk";
 function splitFileToChunks(inputFile, outputDir) {
+
+    return new Promise((resolve, reject) => {
+        
     let readerStream = fs.createReadStream(inputFile, {highWaterMark: maxChunkSize});
+        readerStream.on('error', (err) => reject(err));
     let metadata = {files: [], numberOfFiles: undefined}; // numberOfFiles can already be calculated, and array can be initalized with size
+        let writeFilePromises = []; // see above
     let index = 0;
-    readerStream.on('data', function(chunk) {
+        readerStream.on('data', (chunk) => {
         console.log(chunk.length);
         let outputFile = `${outputDir}/${baseChunkName}_${index}`;
-        fs.writeFile(outputFile, chunk, function (err) {
-            if (err){
-                throw err;
-            }
-        });
-        metadata.files.push(outputFile); // see above
+            let i = index;
+            let writeFilePromise = fsPromises.writeFile(outputFile, chunk)
+                .then(() => metadata.files[i] = outputFile) // see above; dont write full path 
+                .catch(() => {throw new Error('Cannot save chunk to file')});
+            writeFilePromises[index] = writeFilePromise;
         index++;
+        });
+        readerStream.on('end', () => {
+            metadata.numberOfFiles = index; // see above
+            Promise.all(writeFilePromises)
+                .then(() => fsPromises.writeFile(`${outputDir}/metadata.json`, JSON.stringify(metadata)))
+                .then(resolve, reject);
     });
 
-    readerStream.on('end', function(){
-        // TODO: wait till all writings succeed
-        metadata.numberOfFiles = index;
-        fs.writeFile(`${outputDir}/metadata.json`, JSON.stringify(metadata),function (err) {
-            if (err){
-                throw err;
-            }
         });
-        // resolve promise after writing the metadata
-        console.log('done');
-    })
-
 }
 
 function mergeChunksToFile(inputDir, outputFile) {
