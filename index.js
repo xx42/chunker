@@ -1,4 +1,5 @@
 import fs from 'fs';
+const fsPromises = fs.promises;
 
 const maxChunkSize = 1024 * 1024 * 25; // 25MB
 
@@ -8,7 +9,7 @@ const mergeOutput = "./output/mergedFile"
 
 // splitFileToChunks(inputPath, outputPath);
 
-mergeChunksToFile(outputPath, mergeOutput);
+mergeChunksToFile(outputPath, mergeOutput).catch((err) => console.error(err));
 
 
 
@@ -44,14 +45,36 @@ function splitFileToChunks(inputFile, outputDir) {
 }
 
 function mergeChunksToFile(inputDir, outputFile) {
-    let metadataString = fs.readFileSync(`${inputDir}/metadata.json`); // TODO: make async
-    let metadata = JSON.parse(metadataString);
-    // TODO: if some files are missing, throw an error and return
+
+    return new Promise((resolve, reject) => {
+
+        let filesPromise = fsPromises.readFile(`${inputDir}/metadata.json`)
+            .then(JSON.parse)
+            .then((metadata) => metadata.files);
+        
+        // break the chain. would have been more elegant with async/await
+        let checkFilesPromise = filesPromise.then((files) => {
+                return files.map((file) => fsPromises.access(file));
+            })
+            .then((accessArray) => Promise.all(accessArray))
+            .catch(() => reject(new Error("Cannot find all chunks")));
     
     let writerStream = fs.createWriteStream(outputFile);
-    for (let file of metadata.files) {
-        let data = fs.readFileSync(file); // TODO: make async
-        writerStream.write(data);
+
+        Promise.all([filesPromise, checkFilesPromise])
+            .then(([files,_]) => {
+                // TODO: handle errors
+                let p = Promise.resolve();
+                for (let i = 0; i < files.length; i++){
+                    p = p.then(() => fsPromises.readFile(files[i]))
+                        .then((data) => writerStream.write(data))
+                        // .catch((err) => reject(err));
     }
-    writerStream.end();
+                return p;
+            })
+            .then(() => writerStream.end())
+            .then(resolve, reject);
+
+    });
+
 }
