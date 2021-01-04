@@ -11,8 +11,8 @@ const maxChunkSize = 1024 * 1024 * 25; // 25MB
 const args = process.argv.slice(2);
 const commandWord = args[0];
 const inputOutputPairs = splitArrayToSmallArrays(args.slice(1), 2);
-let commandFunction;
 
+let commandFunction;
 switch (commandWord) {
     case 'split':
         commandFunction = splitFileToChunks;
@@ -25,11 +25,15 @@ switch (commandWord) {
 }
 
 Promise.all(inputOutputPairs.map((inputOutput) => commandFunction(...inputOutput)))
-    .catch((err) => console.error(err));
+    .catch(console.error);
 
 
 async function splitFileToChunks(inputFile, outputDir) {
-    
+    try {
+        await fsPromises.access(inputFile);
+    } catch {
+        throw new Error("Invalid input path");
+    }
     let mkdirPromise = fsPromises.mkdir(outputDir, { recursive: true }); // in case directory doesnt exist
     let fileSize = (await fsPromises.stat(inputFile)).size;
     let numberOfFiles = Math.ceil(fileSize / maxChunkSize);
@@ -63,7 +67,11 @@ async function splitFileToChunks(inputFile, outputDir) {
 }
 
 async function mergeChunksToFile(inputDir, outputFile) {
-    
+    try {
+        await fsPromises.access(inputDir);
+    } catch {
+        throw new Error("Invalid input path");
+    }
     let metadataString = await fsPromises.readFile(path.normalize(`${inputDir}/metadata.json`));
     let metadata = JSON.parse(metadataString);
     let files = metadata.files;
