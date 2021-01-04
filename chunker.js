@@ -5,27 +5,30 @@ const fsPromises = fs.promises;
 const maxChunkSize = 1024 * 1024 * 25; // 25MB
 
 // in real life I would use something like yargs to handle command line arguments
-const args = process.argv.slice(2);
-const inputPath = args[1];
-const outputPath = args[2];
 
-switch (args[0]) {
+// a valid command is of the form:
+// node chunker.js (split | merge) inputPath1 outputPath1 [inputPath2 outputPath2 [inputPath3 outputPath3...]]
+const args = process.argv.slice(2);
+const commandWord = args[0];
+const inputOutputPairs = splitArrayToSmallArrays(args.slice(1), 2);
+let commandFunction;
+
+switch (commandWord) {
     case 'split':
-        splitFileToChunks(inputPath, outputPath).catch((err) => console.error(err));
+        commandFunction = splitFileToChunks;
         break;
     case 'merge':
-        mergeChunksToFile(inputPath, outputPath).catch((err) => console.error(err));
+        commandFunction = mergeChunksToFile;
         break;
     default:
         console.log('Command must be "split" or "merge"');
 }
 
+Promise.all(inputOutputPairs.map((inputOutput) => commandFunction(...inputOutput)))
+    .catch((err) => console.error(err));
 
-
-// TODO: deal with relative and absolute pathes, escape double slashes
 
 async function splitFileToChunks(inputFile, outputDir) {
-   
     
     let mkdirPromise = fsPromises.mkdir(outputDir, { recursive: true }); // in case directory doesnt exist
     let fileSize = (await fsPromises.stat(inputFile)).size;
@@ -94,4 +97,12 @@ function readAndPipePromise(fileToRead, writeStream) {
         rs.pipe(writeStream, { end: false });
         rs.on('end', resolve);
     });
+}
+
+function splitArrayToSmallArrays(array, smallArraySize){
+    var smallArrays = [];
+    while (array.length > 0){
+        smallArrays.push(array.splice(0, smallArraySize));
+    }
+    return smallArrays;
 }
