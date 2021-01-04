@@ -48,27 +48,32 @@ async function splitFileToChunks(inputFile, outputDir) {
     let mkdirPromise = fsPromises.mkdir(outputDir, { recursive: true }); // in case directory doesnt exist yet
     let fileSize = (await fsPromises.stat(inputFile)).size;
     let numberOfFiles = Math.ceil(fileSize / maxChunkSize);
+    let metadata = {files: new Array(numberOfFiles)};
     let inputFileName = path.parse(inputFile).name;
     await mkdirPromise;
 
     return new Promise((resolve, reject) => {
         let readerStream = fs.createReadStream(inputFile, { highWaterMark: maxChunkSize });
         readerStream.on('error', reject);
-        let metadata = {files: new Array(numberOfFiles)};
-        let writePromises = new Array(numberOfFiles);
+        let writePromise;
         let index = 0;
+        // keep pausing and resuming the stream to make sure the chunks are written sequentially
+        // because otherwise they can pile up on memory
         readerStream.on('data', (chunk) => {
+            readerStream.pause();
             let outputFile = path.normalize(`${outputDir}/${inputFileName}_${index}`);
             let i = index;
-            writePromises[index] = fsPromises.writeFile(outputFile, chunk)
+            // we only care about the writePromise of the last file, so we keep overwriting it
+            writePromise = fsPromises.writeFile(outputFile, chunk)
                 .then(() => metadata.files[i] = outputFile)
-                .catch(() => { return reject(new Error("Cannot save chunk to file")); });
+                .then(() => readerStream.resume())
+                .catch(() => reject(new Error("Cannot save chunk to file")));
             index++;
         });
         readerStream.on('end', () => {
             // save a metadata json file that contains an array listing all the chunks in order
             let metadataFile = path.normalize(`${outputDir}/metadata.json`);
-            Promise.all(writePromises)
+            writePromise
                 .then(() => fsPromises.writeFile(metadataFile, JSON.stringify(metadata)))
                 .then(resolve)
                 .catch(reject);
