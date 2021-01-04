@@ -23,72 +23,60 @@ switch (args[0]) {
 
 
 // TODO: deal with relative and absolute pathes, escape double slashes
-// TODO: mkdir if output path doesnt exist
 
-function splitFileToChunks(inputFile, outputDir) {
+async function splitFileToChunks(inputFile, outputDir) {
+   
+    
+    let mkdirPromise = fsPromises.mkdir(outputDir, { recursive: true }); // in case directory doesnt exist
+    let fileSize = (await fsPromises.stat(inputFile)).size;
+    let numberOfFiles = Math.ceil(fileSize / maxChunkSize);
+    let inputFileName = path.parse(inputFile).name;
+    await mkdirPromise;
 
     return new Promise((resolve, reject) => {
-
-        let inputFileName = path.parse(inputFile).name;
-        let readerStream = fs.createReadStream(inputFile, {highWaterMark: maxChunkSize});
-        readerStream.on('error', (err) => reject(err));
-        let metadata = {files: [], numberOfFiles: undefined}; // numberOfFiles can already be calculated, and array can be initalized with size
-        let writeFilePromises = []; // see above
+        let readerStream = fs.createReadStream(inputFile, { highWaterMark: maxChunkSize });
+        readerStream.on('error', reject);
+        let metadata = {files: new Array(numberOfFiles)};
+        let writePromises = new Array(numberOfFiles);
         let index = 0;
         readerStream.on('data', (chunk) => {
-            console.log(chunk.length);
             let outputFile = path.normalize(`${outputDir}/${inputFileName}_${index}`);
             let i = index;
             let writeFilePromise = fsPromises.writeFile(outputFile, chunk)
                 .then(() => metadata.files[i] = outputFile)
-                .catch(() => reject(new Error('Cannot save chunk to file')));
-            writeFilePromises[index] = writeFilePromise;
+                .catch(() => { return reject(new Error("Cannot save chunk to file")); });
+            writePromises[index] = writeFilePromise;
             index++;
         });
         readerStream.on('end', () => {
-            metadata.numberOfFiles = index; // see above
-            Promise.all(writeFilePromises)
-                .then(() => fsPromises.writeFile(`${outputDir}/metadata.json`, JSON.stringify(metadata)))
-                .then(resolve, reject);
+            let metadataFile = path.normalize(`${outputDir}/metadata.json`);
+            Promise.all(writePromises)
+                .then(() => fsPromises.writeFile(metadataFile, JSON.stringify(metadata)))
+                .then(resolve)
+                .catch(reject);
         });
 
     });
 }
 
-function mergeChunksToFile(inputDir, outputFile) {
+async function mergeChunksToFile(inputDir, outputFile) {
+    
+    let metadataString = await fsPromises.readFile(path.normalize(`${inputDir}/metadata.json`));
+    let metadata = JSON.parse(metadataString);
+    let files = metadata.files;
+    // make sure all files exit
+    let existenceArray = files.map((file) => fsPromises.access(file));
+    await Promise.all(existenceArray).catch(() => { throw new Error("Cannot find all chunks") });
 
-    // TODO: this is possibly an anti-pattern
-    return new Promise((resolve, reject) => {
+    await fsPromises.mkdir(path.dirname(outputFile), { recursive: true }); // in case directory doesnt exist
+    let writerStream = fs.createWriteStream(outputFile);
+    writerStream.on('error', (err) => {throw err});
 
-        let filesPromise = fsPromises.readFile(`${inputDir}/metadata.json`)
-            .then(JSON.parse)
-            .then((metadata) => metadata.files);
-        
-        // checking if files exists in parallel isn't really helpful but whatever
-        let checkFilesPromise = filesPromise.then((files) => {
-                return files.map((file) => fsPromises.access(file));
-            })
-            .then((accessArray) => Promise.all(accessArray))
-            .catch(() => { throw new Error("Cannot find all chunks") });
+    for (let i = 0; i < files.length; i++){
+        await readAndPipePromise(files[i], writerStream);
+    }
 
-        let writerStream = fs.createWriteStream(outputFile);
-        writerStream.on('error', (err) => reject(err));
-
-        // break the chain, so this happens only after we check that the files exist.
-        // would have been more elegant with async/await.
-        Promise.all([filesPromise, checkFilesPromise])
-            .then(([files,_]) => {
-                let p = Promise.resolve();
-                for (let i = 0; i < files.length; i++){
-                    p = p.then(() => readAndPipePromise(files[i], writerStream));
-                }
-                return p;
-            })
-            .then(() => writerStream.end())
-            .then(resolve, reject);
-
-    });
-
+    writerStream.end();
 }
 
 /**
@@ -102,8 +90,8 @@ function mergeChunksToFile(inputDir, outputFile) {
 function readAndPipePromise(fileToRead, writeStream) {
     return new Promise((resolve, reject) => {
         let rs = fs.createReadStream(fileToRead);
-        rs.on('error', (err) => reject(err));
+        rs.on('error', reject);
         rs.pipe(writeStream, { end: false });
-        rs.on('end', () => resolve());
+        rs.on('end', resolve);
     });
 }
